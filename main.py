@@ -4,6 +4,7 @@ from easyocr import Reader
 import numpy as np
 from flask import Flask
 import time
+from rapidfuzz import fuzz
 
 app = Flask(__name__)
 
@@ -18,7 +19,10 @@ class OCRMatcher:
     def load_text_data(self):
         try:
             with open('data.json', 'r') as f:
-                return json.load(f)['texts']
+                data = json.load(f)
+                if not isinstance(data, dict) or 'texts' not in data or not isinstance(data['texts'], list):
+                    raise ValueError("JSON format invalid: must be an object with a 'texts' list")
+                return data['texts']
         except Exception as e:
             print(f"Error loading text data: {e}")
             return []
@@ -69,13 +73,14 @@ class OCRMatcher:
 
     def compare_texts(self, detected_text):
         if not detected_text:
-            return False, None
-            
+            return []
+        matches = []
         for reference_text in self.text_data:
-            # Case insensitive comparison
-            if reference_text.lower() in detected_text.lower():
-                return True, reference_text
-        return False, None
+            # Fuzzy match: consider a match if similarity is above 80
+            score = fuzz.partial_ratio(reference_text.lower().strip(), detected_text.lower().strip())
+            if score > 80:
+                matches.append((reference_text, score))
+        return matches
 
     def run(self):
         if not self.setup_webcam() or not self.setup_ocr():
@@ -92,40 +97,32 @@ class OCRMatcher:
                     print("Failed to grab frame")
                     break
 
-                # Show original frame
                 cv2.imshow('Webcam Feed', frame)
-                
                 key = cv2.waitKey(1) & 0xFF
-                
                 if key == ord('o'):
                     current_time = time.time()
                     if current_time - self.last_ocr_time >= self.OCR_COOLDOWN:
                         print("Processing OCR...")
                         detected_text, annotated_frame = self.process_ocr(frame.copy())
-                        
+                        print(f"Detected text: '{detected_text}'")  # Debug print
                         if detected_text:
-                            match_found, matched_text = self.compare_texts(detected_text)
-                            if match_found:
-                                print(f"Match found: '{matched_text}'")
-                                # Draw green border for match
+                            matches = self.compare_texts(detected_text)
+                            if matches:
+                                print(f"Matches found: {matches}")
                                 cv2.rectangle(annotated_frame, (0, 0), 
                                            (annotated_frame.shape[1], annotated_frame.shape[0]), 
                                            (0, 255, 0), 10)
                             else:
                                 print("No match found")
-                                # Draw red border for no match
                                 cv2.rectangle(annotated_frame, (0, 0), 
                                            (annotated_frame.shape[1], annotated_frame.shape[0]), 
                                            (0, 0, 255), 10)
-                        
                         cv2.imshow('OCR Result', annotated_frame)
                         self.last_ocr_time = current_time
                     else:
                         print(f"Please wait {self.OCR_COOLDOWN - (current_time - self.last_ocr_time):.1f} seconds before next OCR")
-                
                 elif key == ord('q'):
                     break
-
         finally:
             self.cleanup()
 
