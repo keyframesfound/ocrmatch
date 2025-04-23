@@ -20,6 +20,7 @@ class OCRMatcher:
         self.region_end = None
         self.region_selected = False
         self.region_img = None
+        self.match_threshold = 65  # Default fuzzy match threshold
         
     def load_text_data(self):
         try:
@@ -105,9 +106,8 @@ class OCRMatcher:
             return []
         matches = []
         for reference_text in self.text_data:
-            # Fuzzy match: consider a match if similarity is above 80
             score = fuzz.partial_ratio(reference_text.lower().strip(), detected_text.lower().strip())
-            if score > 65:
+            if score > self.match_threshold:
                 matches.append((reference_text, score))
         return matches
 
@@ -123,6 +123,18 @@ class OCRMatcher:
             self.selecting_region = False
             self.region_selected = True
 
+    def draw_text_overlay(self, frame, detected_text, matches):
+        y0 = 30
+        dy = 30
+        # Draw detected text
+        cv2.putText(frame, f"Detected: {detected_text}", (10, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,0), 2)
+        # Draw matches and scores
+        for i, (ref, score) in enumerate(matches):
+            cv2.putText(frame, f"Match: {ref} (Score: {score})", (10, y0 + (i+1)*dy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
+        # Draw threshold info
+        cv2.putText(frame, f"Threshold: {self.match_threshold}", (10, y0 + (len(matches)+2)*dy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,200,255), 2)
+        return frame
+
     def run(self):
         if not self.setup_webcam() or not self.setup_ocr():
             return
@@ -131,6 +143,8 @@ class OCRMatcher:
         print("Press 'o' to perform OCR on full frame")
         print("Press 'u' to select a region and perform OCR on it")
         print("Press 'q' to quit")
+        print("Press '+' or '=' to increase match threshold")
+        print("Press '-' to decrease match threshold")
         
         cv2.namedWindow('Webcam Feed')
         cv2.setMouseCallback('Webcam Feed', self.region_mouse_callback)
@@ -158,6 +172,8 @@ class OCRMatcher:
                         print(f"Detected text: '{detected_text}'")  # Debug print
                         if detected_text:
                             matches = self.compare_texts(detected_text)
+                            # Draw overlays
+                            annotated_frame = self.draw_text_overlay(annotated_frame, detected_text, matches)
                             if matches:
                                 print(f"Matches found: {matches}")
                                 cv2.rectangle(annotated_frame, (0, 0), 
@@ -198,6 +214,7 @@ class OCRMatcher:
                                     continue
                                 print(f"Detected region text: '{detected_text}'")
                                 matches = self.compare_texts(detected_text)
+                                roi_annotated = self.draw_text_overlay(roi_annotated, detected_text, matches)
                                 if matches:
                                     print(f"Matches found: {matches}")
                                     cv2.rectangle(roi_annotated, (0, 0), (roi_annotated.shape[1], roi_annotated.shape[0]), (0, 255, 0), 10)
@@ -218,6 +235,12 @@ class OCRMatcher:
                             print("Region selection cancelled.")
                             self.region_selected = False
                             break
+                elif key == ord('+') or key == ord('='):
+                    self.match_threshold = min(100, self.match_threshold + 1)
+                    print(f"Threshold increased to {self.match_threshold}")
+                elif key == ord('-'):
+                    self.match_threshold = max(0, self.match_threshold - 1)
+                    print(f"Threshold decreased to {self.match_threshold}")
                 elif key == ord('q'):
                     break
         finally:
